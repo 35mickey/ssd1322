@@ -2,15 +2,20 @@ from PIL import Image, ImageDraw, ImageFont
 import time
 import spidev
 import gpiod
+import os
 
 class SSD1322:
     def __init__(self, width=256, height=64):
         self.width = width
         self.height = height
 
-        # 使用Pillow创建一个图像对象，模式为1（单色图）
-        self.image = Image.new('1', (self.width, self.height))
+        # 使用Pillow创建一个图像对象，模式为L（8位灰度图）；创建画笔和字体
+        self.image = Image.new('L', (self.width, self.height))
         self.draw = ImageDraw.Draw(self.image)
+        self.font_en = ImageFont.load_default()  # 使用默认字体
+
+        # 获取当前脚本所在的目录
+        self.ssd1322_dir = os.path.dirname(os.path.abspath(__file__))
 
         # 初始化显示
         time.sleep(0.005)
@@ -54,9 +59,10 @@ class SSD1322:
         self.write_cmd(0xC7)  # Master Contrast Current Control
         self.write_data(0x0F)  # 0x0F = (default)
 
-        self.write_cmd(0xB8)  # Select Custom Gray Scale table (GS0 = 0)
-        for value in [0x00, 0x02, 0x08, 0x0D, 0x14, 0x1A, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x60, 0x70, 0x00]:
-            self.write_data(value)
+        self.write_cmd(0xB9)  # Select Default Gray Scale table
+        # self.write_cmd(0xB8)  # Select Custom Gray Scale table (GS0 = 0)
+        # for value in [0x00, 0x02, 0x08, 0x0D, 0x14, 0x1A, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x60, 0x70, 0x00]:
+        #     self.write_data(value)
 
         self.write_cmd(0xB1)  # Set Phase Length
         self.write_data(0xE2)  # 0xE2 = Phase 1 period (reset phase length) = 5 DCLKs,
@@ -120,11 +126,31 @@ class SSD1322:
                 result.append((expanded_byte >> (8 * (3 - i))) & 0xFF)
 
         return result
+    
+    # 将两个8位灰度合并为1个8位自己(2个像素)，因为SSD1322是4位颜色深度
+    def combine_bits(self, data):
+        result = bytearray()
+
+        # 遍历数据，按每两个字节进行处理
+        for i in range(0, len(data), 2):
+            byte1 = data[i]
+            # 如果是奇数长度，补充0字节
+            byte2 = data[i + 1] if i + 1 < len(data) else 0
+            # 合并两个字节的高低4位，形成新字节
+            new_byte = (byte1 & 0xF0) | ( (byte2 >> 4) & 0x0F ) 
+
+            # 将新字节添加到结果中
+            result.append(new_byte)
+
+        return result
 
     def show(self):
         # Convert the Pillow image into raw data
         # image_data = self.image.convert('1')  # Convert to 1-bit black and white image
-        byte_data = self.expand_bits(self.image.tobytes())
+        # byte_data = self.expand_bits(self.image.tobytes())
+        byte_data = self.combine_bits(self.image.tobytes())
+        # print([bin(byte) for byte in self.image.tobytes()])
+        # print([bin(byte) for byte in byte_data])
         # self.image.save("./aaa.jpg")
 
         offset = (480 - self.width) // 2
@@ -140,48 +166,38 @@ class SSD1322:
         self.write_data(self.height - 1)
 
         self.write_cmd(0x5C)
-
-        # self.Column_Address(0,0+self.width//4-1)
-        # self.Row_Address(0,0+self.height-1)
-
         self.write_data(byte_data)
 
+    # 全屏填充或清屏
     def fill(self, col):
         self.draw.rectangle((0, 0, self.width - 1, self.height - 1), fill=col)
 
-    def pixel(self, x, y, col):
+    # 画一个像素，在(x,y)
+    def pixel(self, x, y, col=255):
         self.draw.point((x, y), fill=col)
 
-    def line(self, x1, y1, x2, y2, col):
+    # 画一条线，从(x1,y1)到(x2,y2)
+    def line(self, x1, y1, x2, y2, col=255):
         self.draw.line((x1, y1, x2, y2), fill=col)
 
-    def text(self, string, x, y, col=255):
-        font = ImageFont.load_default()  # 使用默认字体
-        self.draw.text((x, y), string, fill=col, font=font)
+    # 写ASCII文字
+    def text(self, string, x, y, size=16, col=255):
+        self.draw.text((x, y), string, fill=col, font=self.font_en)
 
-    # # 设置显示的列起始和终止地址
-    # def Column_Address(self, a, b):
-        # self.write_cmd(0x15)  # Set Column Address
-        # self.write_data(0x1c + a)
-        # self.write_data(0x1c + b)
+    # 写中文字体
+    def text_zh(self, string, x, y, size=16, col=255):
+        self.font_zh = ImageFont.truetype(self.ssd1322_dir + "/ttf/hei_ti.ttf", size)
+        self.draw.text((x, y), string, fill=col, font=self.font_zh)
 
-    # # 设置显示的行起始和终止地址
-    # def Row_Address(self, a, b):
-        # self.write_cmd(0x75)  # Set Row Address
-        # self.write_data(a)
-        # self.write_data(b)
-        # self.write_cmd(0x5C)  # Write RAM
-
-    # # OLED 填充指定区域
-    # def OLED_Fill(self, xstr, ystr, xend, yend, color):
-        # xstr //= 4
-        # xend //= 4
-        # self.Column_Address(xstr, xend - 1)
-        # self.Row_Address(ystr, yend - 1)
-        # for x in range(xstr, xend):
-            # for y in range(ystr, yend):
-                # self.write_data(color)
-                # self.write_data(color)
+    # 将一张图片插入当前画布，左上角是(x,y)
+    def paste_pic(self, path, x, y):
+        # 打开当前图片和要插入的图片,转换为8位灰度图
+        insert_image = Image.open(path)
+        insert_image = insert_image.convert('L')
+        # 确定插入的位置 (左上角)
+        position = (x, y)  # 在目标图片的 (x, y) 位置插入源图片
+        # 将源图片粘贴到目标图片上
+        self.image.paste(insert_image, position)
 
     def write_cmd(self, cmd):
         raise NotImplementedError
@@ -195,6 +211,7 @@ class SSD1322_SPI(SSD1322):
         self.dc = dc_line
         self.res = res_line
 
+        # 复位
         self.res.set_value(1)
         time.sleep(0.01)
         self.res.set_value(0)
@@ -252,7 +269,7 @@ if __name__ == "__main__":
     SSD1322_HEIGHT = 64
 
     disp=SSD1322_SPI(SSD1322_WIDTH,SSD1322_HEIGHT,spi_dev,dc_line,res_line)
-    disp.text("Hello SBB!",0,0,1)
-    disp.text("GoodBye SBB!",160,50,1)
-    disp.line(0,63,255,0,1)
+    disp.text("Hello SBB!",0,0,size=12)
+    disp.text_zh("GoodBye 贝贝熊!",160,50,size=12)
+    disp.line(0,63,255,0,255)
     disp.show()
