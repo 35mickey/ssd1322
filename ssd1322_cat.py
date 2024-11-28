@@ -189,6 +189,15 @@ class SSD1322:
         self.font_zh = ImageFont.truetype(self.ssd1322_dir + "/ttf/hei_ti.ttf", size)
         self.draw.text((x, y), string, fill=col, font=self.font_zh)
 
+    # 将一个图片对象插入当前画布，左上角是(x,y)
+    def paste(self, img, x, y):
+        # 转换为8位灰度图
+        insert_image = img.convert('L')
+        # 确定插入的位置 (左上角)
+        position = (x, y)  # 在目标图片的 (x, y) 位置插入源图片
+        # 将源图片粘贴到目标图片上
+        self.image.paste(insert_image, position)
+
     # 将一张图片插入当前画布，左上角是(x,y)
     def paste_pic(self, path, x, y):
         # 打开当前图片和要插入的图片,转换为8位灰度图
